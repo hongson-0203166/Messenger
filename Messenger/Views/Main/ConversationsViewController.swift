@@ -9,24 +9,13 @@ import UIKit
 import FirebaseAuth
 import JGProgressHUD
 import SnapKit
-struct Conversation{
-    let id:String
-    let name:String
-    let otherUserEmail:String
-    let latestMessage:LatestMessage
-}
 
-struct LatestMessage{
-    let date:String
-    let text:String
-    let isRead:Bool
-}
 
-class MessengeViewController: UIViewController {
+class ConversationsViewController: UIViewController {
     
     private var conversations = [Conversation]()
     
-    private let searchController:UISearchController = {
+    private let searchController: UISearchController = {
        let search = UISearchController(searchResultsController: SearchResultsViewController())
         search.searchBar.searchBarStyle = .minimal
         search.searchBar.placeholder = "Search with @username"
@@ -45,8 +34,13 @@ class MessengeViewController: UIViewController {
         title = "Message"
             navigationController?.setNavigationBarHidden(false, animated: true)
        
+       
         view.addSubview(tableView)
-        tableView.tableHeaderView = searchController.searchBar
+        
+        navigationItem.searchController = searchController
+        navigationItem.hidesSearchBarWhenScrolling = false
+        
+//        tableView.tableHeaderView = searchController.searchBar
         searchController.searchResultsUpdater = self
         searchController.delegate = self
             searchController.hidesNavigationBarDuringPresentation = false
@@ -54,8 +48,8 @@ class MessengeViewController: UIViewController {
             searchController.obscuresBackgroundDuringPresentation = false
 //        fetConversations()
         setupTableView()
-        startListeningForConversation()
-       // exit()
+        startListeningForCOnversations()
+       exit()
     }
    
     func exit(){
@@ -68,14 +62,13 @@ class MessengeViewController: UIViewController {
         }
         userLogin()
     }
-    
+//    
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         userLogin()
-        
     }
-    func showChat(with conversation : Conversation) {
-        print("showChat \(conversation.otherUserEmail) và id: \(conversation.id)")
+    func showConversation(with conversation : Conversation) {
+        print("showConversation \(conversation.otherUserEmail) và id: \(conversation.id)")
     
         let chatVC = ChatViewController(with: conversation.otherUserEmail, id: conversation.id)
         chatVC.title = conversation.name
@@ -103,47 +96,70 @@ class MessengeViewController: UIViewController {
     }
 
     
-    func startListeningForConversation(){
-        guard let email = UserDefaults.standard.string(forKey: "email") as? String else{
-            return
-        }
-        let safeEmail = DatabaseManager.shared.safeEmail(email: email)
-        DatabaseManager.shared.getAllConversations(for: safeEmail) {[weak self] results in
-            switch results{
-            case.success(let conversations):
-                guard !conversations.isEmpty else{
-                    return
-                }
-                DispatchQueue.main.async {
-                    //self?.tableView.isHidden = false
-                    self?.conversations = conversations
-                    print("conversation \(self?.conversations)")
-                
-                    self?.tableView.reloadData()
-                }
-                break
-            case .failure( let error):
-                print("Faild to get conversatoin: \(error)")
-                break
+    private func startListeningForCOnversations() {
+            guard let email = UserDefaults.standard.value(forKey: "email") as? String else {
+                return
             }
+
+            print("starting conversation fetch...")
+
+        let safeEmail = DatabaseManager.shared.safeEmail(email: email)
+
+            DatabaseManager.shared.getAllConversations(for: safeEmail, completion: { [weak self] result in
+                switch result {
+                case .success(let conversations):
+                    print("successfully got conversation models")
+                    guard !conversations.isEmpty else {
+                        self?.tableView.isHidden = true
+                       
+                        return
+                    }
+                    
+                    self?.tableView.isHidden = false
+                    self?.conversations = conversations
+
+                    DispatchQueue.main.async {
+                        self?.tableView.reloadData()
+                    }
+                case .failure(let error):
+                    self?.tableView.isHidden = true
+                  
+                    print("failed to get convos: \(error)")
+                }
+            })
         }
-    }
-//    func fetConversations(){
-//        DatabaseManager.shared.getAllUser { results in
-//            switch results{
-//            case.failure(let error):
-//                print("Lỗi \(error)")
-//            case .success(let results):
-//                DispatchQueue.main.async {
-//                    self.resultU = results
-//                    self.tableView.reloadData()
-//                }
-//               
-//            }
-//        }
-//    }
+
+    
+    private func createNewConversation(result: SearchResult) {
+           let name = result.name
+        let email = DatabaseManager.shared.safeEmail(email: result.email)
+
+           // check in datbase if conversation with these two users exists
+           // if it does, reuse conversation id
+           // otherwise use existing code
+
+           DatabaseManager.shared.conversationExists(iwth: email, completion: { [weak self] result in
+               guard let strongSelf = self else {
+                   return
+               }
+               switch result {
+               case .success(let conversationId):
+                   let vc = ChatViewController(with: email, id: conversationId)
+                   vc.isNewConversation = false
+                   vc.title = name
+                   vc.navigationItem.largeTitleDisplayMode = .never
+                   strongSelf.navigationController?.pushViewController(vc, animated: true)
+               case .failure(_):
+                   let vc = ChatViewController(with: email, id: nil)
+                   vc.isNewConversation = true
+                   vc.title = name
+                   vc.navigationItem.largeTitleDisplayMode = .never
+                   strongSelf.navigationController?.pushViewController(vc, animated: true)
+               }
+           })
+       }
 }
-extension MessengeViewController:UITableViewDelegate,UITableViewDataSource{
+extension ConversationsViewController:UITableViewDelegate,UITableViewDataSource{
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return conversations.count
     }
@@ -155,45 +171,45 @@ extension MessengeViewController:UITableViewDelegate,UITableViewDataSource{
     }
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        self.showChat(with: conversations[indexPath.row])
+        self.showConversation(with: conversations[indexPath.row])
     }
     func tableView(_ tableView: UITableView, didHighlightRowAt indexPath: IndexPath) {
         90
     }
     
 }
-extension MessengeViewController:UISearchResultsUpdating,UISearchControllerDelegate{
+extension ConversationsViewController:UISearchResultsUpdating,UISearchControllerDelegate{
     
     func updateSearchResults(for searchController: UISearchController) {
         title = ""
         guard let resultsController = searchController.searchResultsController as? SearchResultsViewController else{return}
         let searchText = searchController.searchBar.text
+        
         if(searchText != ""){
-            DatabaseManager.shared.getAllUser { results in
+            DatabaseManager.shared.searchFriendToSendMessage { results in
                 switch results {
                 case .failure(let err):
                     print("Lỗi không thể lấy ngừoi dùng \(err)")
+                    
                 case .success(let result):
                     print("Danh sách ngừoi dùng:\(result)")
-                    let resultUsers:[[String:String]] = result.filter {
-                        guard let name = $0["name"]?.lowercased() as? String else{
+                    let resultUsers:[SearchResult] = result.filter {
+                        guard let name = $0.name.lowercased() as? String else{
                             return false
                         }
                         return name.contains(searchText?.lowercased() ?? "")
-                        
                     }
-                    
                     resultsController.updateTableViewResults(users: resultUsers)
                 }
                 
+                
                 resultsController.completion={user in
                     print("Chat with User:\(user)")
-                    let chatVC = ChatViewController(with: user["email"] ?? "", id: "")
-                        chatVC.title = user["name"] ?? ""
+                    let chatVC = ChatViewController(with: user.email, id: "")
+                    chatVC.title = user.name
                         chatVC.isNewConversation = true
                     chatVC.navigationItem.largeTitleDisplayMode = .never
                     self.navigationController?.pushViewController(chatVC, animated: true)
-                    
                 }
             }
         }
